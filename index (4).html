@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>My Base Mainnet dApp</title>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          Helvetica, Arial, sans-serif;
+        text-align: center;
+        margin-top: 50px;
+        background-color: #f0f4f8;
+        color: #1a202c;
+      }
+      .container {
+        max-width: 600px;
+        margin: auto;
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      }
+      h1 {
+        color: #0052ff;
+      }
+      input {
+        font-size: 16px;
+        padding: 10px;
+        width: calc(100% - 24px);
+        margin-bottom: 10px;
+        border: 1px solid #cbd5e0;
+        border-radius: 4px;
+      }
+      button {
+        font-size: 16px;
+        padding: 10px 20px;
+        cursor: pointer;
+        border-radius: 4px;
+        border: none;
+        font-weight: bold;
+      }
+      #connectButton {
+        background-color: #0052ff;
+        color: white;
+      }
+      #setMessageButton {
+        background-color: #38a169;
+        color: white;
+      }
+      #setMessageButton:disabled {
+        background-color: #a0aec0;
+      }
+      #currentMessage {
+        margin-top: 20px;
+        padding: 15px;
+        background-color: #edf2f7;
+        border-radius: 4px;
+        font-size: 1.2em;
+        font-weight: bold;
+        word-wrap: break-word;
+      }
+      .hidden {
+        display: none;
+      }
+    </style>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js"></script>
+    <script src="https://unpkg.com/web3modal@1.9.12/dist/index.js"></script>
+    <script src="https://unpkg.com/@walletconnect/web3-provider@1.8.0/dist/umd/index.min.js"></script>
+  </head>
+  <body>
+    <div class="container">
+      <h1>My dApp on Base Mainnet</h1>
+      <p>Supports MetaMask, Coinbase, Rabby & more!</p>
+      <button id="connectButton">Connect Wallet</button>
+
+      <div id="app" class="hidden">
+        <h3>Current Message:</h3>
+        <p id="currentMessage">Loading...</p>
+        <hr style="margin: 20px 0; border-color: #e2e8f0" />
+        <h3>Set a New Message:</h3>
+        <input
+          type="text"
+          id="newMessage"
+          placeholder="Enter your message here"
+        />
+        <button id="setMessageButton">Set Message</button>
+      </div>
+    </div>
+
+    <script>
+      // --- КОНФИГУРАЦИЯ ---
+      const contractAddress = "0x780c78d069640ff4f06b55ae4efb58e5b460c28e";
+      const requiredChainId = "0x2105"; // 8453 в шестнадцатеричном формате для Base Mainnet
+
+      const contractABI = [
+        { inputs: [], stateMutability: "nonpayable", type: "constructor" },
+        {
+          inputs: [],
+          name: "message",
+          outputs: [{ internalType: "string", name: "", type: "string" }],
+          stateMutability: "view",
+          type: "function",
+        },
+        {
+          inputs: [],
+          name: "owner",
+          outputs: [{ internalType: "address", name: "", type: "address" }],
+          stateMutability: "view",
+          type: "function",
+        },
+        {
+          inputs: [
+            { internalType: "string", name: "_newMessage", type: "string" },
+          ],
+          name: "setMessage",
+          outputs: [],
+          stateMutability: "nonpayable",
+          type: "function",
+        },
+      ];
+      // --- КОНЕЦ КОНФИГУРАЦИИ ---
+
+      const providerOptions = {
+        walletconnect: {
+          package: WalletConnectProvider.default,
+          options: { rpc: { 8453: "https://mainnet.base.org" } },
+        },
+      };
+
+      const web3Modal = new Web3Modal.default({
+        network: "mainnet",
+        cacheProvider: false,
+        providerOptions,
+      });
+
+      let provider;
+      let signer;
+      let contract;
+      let instance;
+
+      const connectButton = document.getElementById("connectButton");
+      const appDiv = document.getElementById("app");
+
+      // *** НОВАЯ ФУНКЦИЯ ДЛЯ ПРОВЕРКИ И ПЕРЕКЛЮЧЕНИЯ СЕТИ ***
+      async function checkAndSwitchNetwork() {
+        try {
+          const network = await provider.getNetwork();
+          if (network.chainId !== parseInt(requiredChainId, 16)) {
+            alert("Неверная сеть! Пожалуйста, переключитесь на Base Mainnet.");
+            await window.ethereum.request({
+              method: "wallet_switchEthereumChain",
+              params: [{ chainId: requiredChainId }],
+            });
+          }
+          return true;
+        } catch (error) {
+          console.error("Failed to switch network:", error);
+          alert(
+            "Не удалось переключить сеть. Пожалуйста, сделайте это вручную в вашем кошельке."
+          );
+          return false;
+        }
+      }
+
+      function updateUI() {
+        connectButton.classList.add("hidden");
+        appDiv.classList.remove("hidden");
+        loadMessage();
+      }
+
+      connectButton.onclick = async () => {
+        try {
+          instance = await web3Modal.connect();
+
+          // *** ДОБАВЛЕНЫ СЛУШАТЕЛИ СОБЫТИЙ ***
+          // Срабатывает при смене аккаунта или сети
+          instance.on("accountsChanged", (accounts) => {
+            window.location.reload();
+          });
+          instance.on("chainChanged", (chainId) => {
+            window.location.reload();
+          });
+
+          provider = new ethers.providers.Web3Provider(instance);
+
+          // *** ПРОВЕРЯЕМ СЕТЬ СРАЗУ ПОСЛЕ ПОДКЛЮЧЕНИЯ ***
+          const isNetworkCorrect = await checkAndSwitchNetwork();
+          if (!isNetworkCorrect) return; // Останавливаем, если сеть неверная
+
+          signer = provider.getSigner();
+          contract = new ethers.Contract(contractAddress, contractABI, signer);
+
+          updateUI();
+        } catch (error) {
+          console.error("Could not connect to wallet:", error);
+        }
+      };
+
+      async function loadMessage() {
+        /* ... код без изменений ... */
+      }
+      setMessageButton.onclick = async () => {
+        /* ... код почти без изменений ... */
+      };
+
+      // Ниже функции без изменений, но я их оставлю для полноты кода
+
+      async function loadMessage() {
+        try {
+          const msg = await contract.message();
+          document.getElementById("currentMessage").innerText =
+            msg || "Сообщение еще не установлено.";
+        } catch (error) {
+          console.error("Could not fetch message:", error);
+          document.getElementById("currentMessage").innerText =
+            "Ошибка загрузки сообщения.";
+        }
+      }
+
+      document.getElementById("setMessageButton").onclick = async () => {
+        const newMessageInput = document.getElementById("newMessage");
+        const setMessageButton = document.getElementById("setMessageButton");
+        const newMessage = newMessageInput.value;
+
+        if (!newMessage) {
+          alert("Пожалуйста, введите сообщение!");
+          return;
+        }
+
+        // *** ДОБАВЛЕНА ПРОВЕРКА СЕТИ ПЕРЕД ОТПРАВКОЙ ТРАНЗАКЦИИ ***
+        const isNetworkCorrect = await checkAndSwitchNetwork();
+        if (!isNetworkCorrect) return;
+
+        try {
+          setMessageButton.innerText = "Отправка...";
+          setMessageButton.disabled = true;
+
+          const tx = await contract.setMessage(newMessage);
+          await tx.wait();
+          await loadMessage();
+          newMessageInput.value = "";
+        } catch (error) {
+          console.error("Failed to set message:", error);
+          if (error.code === "ACTION_REJECTED") {
+            alert("Транзакция отклонена.");
+          } else if (error.data?.message?.includes("not the owner")) {
+            alert("Ошибка: Вы не являетесь владельцем этого контракта!");
+          } else {
+            alert("Произошла ошибка. Проверьте консоль.");
+          }
+        } finally {
+          setMessageButton.innerText = "Set Message";
+          setMessageButton.disabled = false;
+        }
+      };
+    </script>
+  </body>
+</html>
